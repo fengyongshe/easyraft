@@ -2,10 +2,12 @@ package com.fys.easyraft.core.peer;
 
 import com.baidu.brpc.client.RpcCallback;
 import com.fys.easyraft.core.conf.RaftOptions;
+import com.fys.easyraft.core.stm.StateMachine;
 import com.fys.easyraft.core.storage.Segments;
 import com.fys.easyraft.core.protobuf.RaftProto;
 import com.fys.easyraft.core.util.ConfigurationUtils;
 import com.google.protobuf.ByteString;
+import com.google.protobuf.InvalidProtocolBufferException;
 import com.googlecode.protobuf.format.JsonFormat;
 import lombok.Getter;
 import lombok.Setter;
@@ -48,6 +50,7 @@ public class RaftNode {
   private volatile long lastAppliedIndex;
 
   private Segments raftLog;
+  private StateMachine stateMachine;
 
   private Lock lock = new ReentrantLock();
   private Condition commitIndexCondition = lock.newCondition();
@@ -60,7 +63,8 @@ public class RaftNode {
 
   public RaftNode(RaftOptions raftOptions,
                   List<RaftProto.Server> servers,
-                  RaftProto.Server localServer) {
+                  RaftProto.Server localServer,
+                  StateMachine stateMachine) {
     this.raftOptions = raftOptions;
     RaftProto.Configuration.Builder confBuilder = RaftProto.Configuration.newBuilder();
     for (RaftProto.Server server: servers) {
@@ -70,6 +74,7 @@ public class RaftNode {
 
     this.localServer = localServer;
 
+    this.stateMachine = stateMachine;
     raftLog = new Segments(raftOptions.getDataDir(), raftOptions.getMaxSegmentFileSize());
     currentTerm = raftLog.getMetaData().getCurrentTerm();
     votedFor = raftLog.getMetaData().getVotedFor();
@@ -492,9 +497,38 @@ public class RaftNode {
     long oldCommitIndex = commitIndex;
     commitIndex = newCommitIndex;
     raftLog.updateMetaData(currentTerm, null, raftLog.getFirstLogIndex(), commitIndex);
+    // 同步到状态机
+    for (long index = oldCommitIndex + 1; index <= newCommitIndex; index++) {
+      RaftProto.LogEntry entry = raftLog.getEntry(index);
+      if (entry.getType() == RaftProto.EntryType.ENTRY_TYPE_DATA) {
+        stateMachine.apply(entry.getData().toByteArray());
+      } else if (entry.getType() == RaftProto.EntryType.ENTRY_TYPE_CONFIGURATION) {
+        applyConfiguration(entry);
+      }
+    }
     lastAppliedIndex = commitIndex;
     log.debug("commitIndex={} lastAppliedIndex={}", commitIndex, lastAppliedIndex);
     commitIndexCondition.signalAll();
+  }
+
+  public void applyConfiguration(RaftProto.LogEntry entry) {
+    try {
+      RaftProto.Configuration newConfiguration
+        = RaftProto.Configuration.parseFrom(entry.getData().toByteArray());
+      configuration = newConfiguration;
+      // update peerMap
+      for (RaftProto.Server server : newConfiguration.getServersList()) {
+        if (!peerMap.containsKey(server.getServerId())
+          && server.getServerId() != localServer.getServerId()) {
+          Peer peer = new Peer(server);
+          peer.setNextIndex(raftLog.getLastLogIndex() + 1);
+          peerMap.put(server.getServerId(), peer);
+        }
+      }
+      log.info("new conf is {}, leaderId={}", jsonFormat.printToString(newConfiguration), leaderId);
+    } catch (InvalidProtocolBufferException ex) {
+      ex.printStackTrace();
+    }
   }
 
   private long packEntries(long nextIndex, RaftProto.AppendEntriesRequest.Builder requestBuilder) {

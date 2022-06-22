@@ -9,6 +9,7 @@ import com.fys.easyraft.core.peer.RaftNode;
 import com.fys.easyraft.core.protobuf.InvokeProto;
 import com.fys.easyraft.core.protobuf.RaftProto;
 import com.fys.easyraft.core.service.RaftClientService;
+import com.fys.easyraft.core.stm.StateMachine;
 import com.googlecode.protobuf.format.JsonFormat;
 import lombok.extern.slf4j.Slf4j;
 
@@ -20,12 +21,14 @@ public class RaftClientServiceImpl implements RaftClientService  {
 
   private static final JsonFormat jsonFormat = new JsonFormat();
   private RaftNode raftNode;
+  private StateMachine stateMachine;
   private int leaderId = -1;
   private RpcClient leaderRpcClient = null;
   private Lock leaderLock = new ReentrantLock();
 
   public RaftClientServiceImpl(RaftNode raftNode) {
     this.raftNode = raftNode;
+    this.stateMachine = this.raftNode.getStateMachine();
   }
 
   @Override
@@ -51,7 +54,10 @@ public class RaftClientServiceImpl implements RaftClientService  {
 
   @Override
   public InvokeProto.GetResponse get(InvokeProto.GetRequest request) {
-    return null;
+    InvokeProto.GetResponse response = stateMachine.get(request);
+    log.info("get request, request={}, response={}", jsonFormat.printToString(request),
+      jsonFormat.printToString(response));
+    return response;
   }
 
   @Override

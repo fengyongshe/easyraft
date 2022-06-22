@@ -8,6 +8,8 @@ import com.fys.easyraft.core.service.RaftClientService;
 import com.fys.easyraft.core.service.RaftConsensusService;
 import com.fys.easyraft.core.service.impl.RaftClientServiceImpl;
 import com.fys.easyraft.core.service.impl.RaftConsensusServiceImpl;
+import com.fys.easyraft.core.stm.DefaultStateMachine;
+import com.fys.easyraft.core.stm.StateMachine;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.ArrayList;
@@ -45,7 +47,9 @@ public class RaftServer {
     raftOptions.setSnapshotPeriodSeconds(30);
     raftOptions.setMaxSegmentFileSize(1024 * 1024);
 
-    RaftNode raftNode = new RaftNode(raftOptions, serverList, localServer);
+    StateMachine stateMachine = new DefaultStateMachine(dataPath);
+
+    RaftNode raftNode = new RaftNode(raftOptions, serverList, localServer, stateMachine);
 
     RpcServer rpcServer = new RpcServer(localServer.getEndpoint().getPort());
     RaftConsensusService raftConsensusService = new RaftConsensusServiceImpl(raftNode);

@@ -187,6 +187,13 @@ public class RaftConsensusServiceImpl implements RaftConsensusService  {
       for (long index = raftNode.getLastAppliedIndex() + 1;
            index <= raftNode.getCommitIndex(); index++) {
         RaftProto.LogEntry entry = raftNode.getRaftLog().getEntry(index);
+        if (entry != null) {
+          if (entry.getType() == RaftProto.EntryType.ENTRY_TYPE_DATA) {
+            raftNode.getStateMachine().apply(entry.getData().toByteArray());
+          } else if (entry.getType() == RaftProto.EntryType.ENTRY_TYPE_CONFIGURATION) {
+            raftNode.applyConfiguration(entry);
+          }
+        }
         raftNode.setLastAppliedIndex(index);
       }
     }
