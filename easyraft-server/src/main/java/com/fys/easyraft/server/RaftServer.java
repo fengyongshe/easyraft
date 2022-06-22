@@ -4,7 +4,9 @@ import com.baidu.brpc.server.RpcServer;
 import com.fys.easyraft.core.conf.RaftOptions;
 import com.fys.easyraft.core.peer.RaftNode;
 import com.fys.easyraft.core.protobuf.RaftProto;
+import com.fys.easyraft.core.service.RaftClientService;
 import com.fys.easyraft.core.service.RaftConsensusService;
+import com.fys.easyraft.core.service.impl.RaftClientServiceImpl;
 import com.fys.easyraft.core.service.impl.RaftConsensusServiceImpl;
 import lombok.extern.slf4j.Slf4j;
 
@@ -47,9 +49,11 @@ public class RaftServer {
 
     RpcServer rpcServer = new RpcServer(localServer.getEndpoint().getPort());
     RaftConsensusService raftConsensusService = new RaftConsensusServiceImpl(raftNode);
+    RaftClientService raftClientService = new RaftClientServiceImpl(raftNode);
 
-    log.info("Register consensus server");
+    log.info("Register service to rpcServer");
     rpcServer.registerService(raftConsensusService);
+    rpcServer.registerService(raftClientService);
 
     log.info("Start the rpcServer");
     rpcServer.start();

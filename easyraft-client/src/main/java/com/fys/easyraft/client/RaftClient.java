@@ -2,29 +2,33 @@ package com.fys.easyraft.client;
 
 import com.baidu.brpc.client.BrpcProxy;
 import com.baidu.brpc.client.RpcClient;
+import com.fys.easyraft.core.protobuf.InvokeProto;
 import com.fys.easyraft.core.protobuf.RaftProto;
-import com.fys.easyraft.core.service.RaftConsensusService;
+import com.fys.easyraft.core.service.RaftClientService;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 public class RaftClient {
 
   public static void main(String[] args) {
-    //list://127.0.0.1:8088
-    String bindUrl = args[0];
+    String bindUrl = "list://127.0.0.1:8088";
     RpcClient rpcClient = new RpcClient(bindUrl);
-    RaftConsensusService consensusService =
-      BrpcProxy.getProxy(rpcClient, RaftConsensusService.class);
+    RaftClientService clientService =
+      BrpcProxy.getProxy(rpcClient, RaftClientService.class);
 
-    RaftProto.VoteRequest voteRequest = RaftProto.VoteRequest.newBuilder()
-      .setServerId(1)
-      .setLastLogIndex(100)
-      .setTerm(3)
-      .setLastLogTerm(2)
+    RaftProto.GetLeaderRequest.Builder builder = RaftProto.GetLeaderRequest.newBuilder();
+    RaftProto.GetLeaderResponse leader = clientService.getLeader(builder.build());
+
+    System.out.println("Leader Info: "+leader.getLeader());
+
+    InvokeProto.SetRequest setRequest = InvokeProto.SetRequest.newBuilder()
+      .setKey("hello3")
+      .setValue("msg")
       .build();
 
-    RaftProto.VoteResponse reponse = consensusService.preVote(voteRequest);
-    log.info("Response from preVote: {}", reponse);
+    InvokeProto.SetResponse setResponse = clientService.set(setRequest);
+    System.out.println("Response after set:" + setResponse);
+
   }
 
 }

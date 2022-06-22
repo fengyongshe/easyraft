@@ -5,12 +5,14 @@ import com.fys.easyraft.core.conf.RaftOptions;
 import com.fys.easyraft.core.storage.Segments;
 import com.fys.easyraft.core.protobuf.RaftProto;
 import com.fys.easyraft.core.util.ConfigurationUtils;
+import com.google.protobuf.ByteString;
 import com.googlecode.protobuf.format.JsonFormat;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.Validate;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
@@ -213,12 +215,12 @@ public class RaftNode {
 
     @Override
     public void success(RaftProto.VoteResponse response) {
-      lock.lock();
       log.info("Received pre vote response from server {} " +
           "in term {} (this server's term was {})",
         peer.getServer().getServerId(),
         response.getTerm(),
         currentTerm);
+      lock.lock();
       try {
         peer.setVoteGranted(response.getGranted());
         if(currentTerm != request.getTerm() || state != NodeState.STATE_PRE_CANDIDATE) {
@@ -495,7 +497,6 @@ public class RaftNode {
     commitIndexCondition.signalAll();
   }
 
-
   private long packEntries(long nextIndex, RaftProto.AppendEntriesRequest.Builder requestBuilder) {
     long lastIndex = Math.min(raftLog.getLastLogIndex(),
       nextIndex + raftOptions.getMaxLogEntriesPerRequest() - 1);
@@ -504,6 +505,57 @@ public class RaftNode {
       requestBuilder.addEntries(entry);
     }
     return lastIndex - nextIndex + 1;
+  }
+
+  public boolean replicate(byte[] data, RaftProto.EntryType entryType) {
+
+    long newLastLogIndex = 0;
+    lock.lock();
+    try {
+      if (state != NodeState.STATE_LEADER) {
+        log.debug("I'm not the leader");
+        return false;
+      }
+      RaftProto.LogEntry logEntry = RaftProto.LogEntry.newBuilder()
+        .setTerm(currentTerm)
+        .setType(entryType)
+        .setData(ByteString.copyFrom(data)).build();
+      List<RaftProto.LogEntry> entries = new ArrayList<>();
+      entries.add(logEntry);
+      newLastLogIndex = raftLog.append(entries);
+      for (RaftProto.Server server : configuration.getServersList()) {
+        final Peer peer = peerMap.get(server.getServerId());
+        executorService.submit(new Runnable() {
+          @Override
+          public void run() {
+            appendEntries(peer);
+          }
+        });
+      }
+
+      if (raftOptions.isAsyncWrite()) {
+        // 主节点写成功后，就返回。
+        return true;
+      }
+
+      // sync wait commitIndex >= newLastLogIndex
+      long startTime = System.currentTimeMillis();
+      while (lastAppliedIndex < newLastLogIndex) {
+        if (System.currentTimeMillis() - startTime >= raftOptions.getMaxAwaitTimeout()) {
+          break;
+        }
+        commitIndexCondition.await(raftOptions.getMaxAwaitTimeout(), TimeUnit.MILLISECONDS);
+      }
+    } catch (Exception ex) {
+      ex.printStackTrace();
+    } finally {
+      lock.unlock();
+    }
+    log.debug("lastAppliedIndex={} newLastLogIndex={}", lastAppliedIndex, newLastLogIndex);
+    if (lastAppliedIndex < newLastLogIndex) {
+      return false;
+    }
+    return true;
   }
 
   private int getElectionTimeoutMs() {
